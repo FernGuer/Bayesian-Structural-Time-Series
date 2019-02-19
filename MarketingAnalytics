@@ -1,0 +1,235 @@
+options(java.parameters = "-Xmx2000m")
+
+install_github("pablobarbera/Rfacebook/Rfacebook")
+install.packages("tm")
+install.packages("RSentiment")
+suppressWarnings(library(Rfacebook))
+suppressWarnings(library(tm))
+suppressWarnings(library(RSentiment))
+
+install.packages("reshape2")
+install.packages("bsts")
+install.packages("devtools")
+install.packages("dplyr")
+install.packages("ggplot2")
+install.packages("forecast")
+install.packages("reshape")
+install.packages("CausalImpact")
+
+install.packages("foreach")
+install.packages("caret")
+install_github("google/CausalImpact")
+install.packages("lubridate")
+install.packages("pls")
+
+install.packages("Performance Analytics")
+suppressWarnings(library(Hmisc))
+suppressWarnings(library(devtools))
+suppressWarnings(library(lubridate))
+suppressWarnings(library(bsts))
+suppressWarnings(library(dplyr))
+suppressWarnings(library(ggplot2))
+suppressWarnings(library(forecast))
+suppressWarnings(library(reshape))
+suppressWarnings(library(reshape2))
+suppressWarnings(library(CausalImpact))
+suppressWarnings(library(foreach))
+suppressWarnings(library(caret))
+suppressWarnings(library(pls))
+
+##########################################################################
+#Google Trends data aggregation for related search terms
+
+#Paste associated keywords from google trends with .csv
+#Read in the csv downloaded from google trends with keyword search history index values
+#Return dataframe with the keyword's search history (date, index)
+
+ReadFiles = function(FileName) {
+  i = sprintf("%s%s", FileName, ".csv", sep = "")
+  df = read.csv(i, header = FALSE, stringsAsFactors = FALSE, skip = 2)
+  return(df)
+}
+
+#List of csv filenames created for each of the top 13 keywords returned when searching 'ClientName'
+Keywords = c("ProductGoogleTrends","CompetitorBGoogleTrends","ProductGoogleTrends",
+             "ClientName.comGoogleTrends","ClientNameCommercialGoogleTrends","ClientNameGoogleTrends",
+             "ClientNameFaceOfTheBrandGoogleTrends","ClientNameFaceOfTheBrandProductGoogleTrends",
+             "ClientNameCompetitorAGoogleTrends","ClientNameReviewGoogleTrends",
+             "ClientNameProductGoogleTrends","ClientNameSubProductProductGoogleTrends",
+             "ClientNameSubProductGoogleTrends")
+             
+#Generate a list of dataframes, each dataframe corresponds to a keyword csv (2 columns, date & index value)
+Keywordlist = list()
+Keywordlist = lapply(Keywords, function(x) ReadFiles(x))
+
+#Draw index value columns from the list of dataframes; since all dates are identical for each keyword, only draw out date column for the 1st dataframe
+KeywordIndexes = Keywordlist[[1]][1]
+for(i in 1:length(Keywordlist)) KeywordIndexes = cbind(KeywordIndexes, Keywordlist[[i]][2])
+
+#narrow the observations to include only the weeks covering client provided data
+KeywordIndexes = KeywordIndexes[-(2:4),]; KeywordIndexes = KeywordIndexes[-(107:115),];
+
+#colnames for the variables are the search terms
+KeywordNames = c()
+for(i in 1:length(KeywordIndexes)){
+  KeywordNames[i] = regmatches(KeywordIndexes[1,i], 
+                             regexpr("[A-Za-z \\.]*",KeywordIndexes[1,i]))
+}
+KeywordNames = gsub(" ", ".", KeywordNames)
+KeywordNames[KeywordNames=="Week"] = "Date"
+
+colnames(KeywordIndexes) = KeywordNames
+KeywordIndexes  = KeywordIndexes[-1,]
+
+KeywordIndexes[,"Date"] = as.Date(KeywordIndexes[,"Date"], format = "%m/%d/%Y")
+
+#Write data out into a consolidated csv so we can append it to our dataset later
+#write.csv(KeywordIndexes, file = "ClientNameKeyWordsGoogleTrends.csv")
+
+#if this needs to be run again, execute the following
+#file.remove("ClientNameKeyWordsGoogleTrends.csv")
+
+#end of google trends script
+########################################################################
+
+#######################################################################
+#facebook scraping instructions
+
+#for FB package, note that you have to get a new token if you log out of a session
+#token: temporary access token created at https://developers.facebook.com/tools/explorer or the OAuth token created with fbOAuth.
+
+#scrape ClientName public page for posts that map to dataset; note reactions are not supported
+fableticsFBdata =  getPage("ClientName", token, n = 90000, since = 'xxxx/xx/xx', until = 'xxxx/xx/xx', feed = TRUE, reactions = FALSE, verbose = FALSE)
+
+#write.csv(ClientNameFBdata, file = "ClientNameFBData.csv")
+
+#ClientNameFBdata = read.csv("ClientNameFBData.csv", header = TRUE)
+
+###############################################################
+
+##########################################################
+#ClientName FB comments sentiment analysis
+
+#draws out comment messages
+ClientNameComments = as.matrix(ClientNameFBdata[,"message"])
+
+#takes punctuation, extra whitespace, trailing space out
+ClientNameText = gsub("[^A-Za-z' .-]", "", ClientNameComments)
+ClientNameText = gsub("(\\.\\.\\.|-|\\.)"," ", ClientNameText)
+ClientNameText = gsub("\\s+"," ", ClientNameText)
+ClientNameText = gsub(" $","", ClientNameText)
+
+#fields that contain no terms must be replaced
+ClientNameText[ClientNameText == "" | is.na(ClientNameText),] = "NoTerms"
+
+#turn messages into a corpus
+ClientNameUniText.corp = Corpus(VectorSource(ClientNameText))
+
+#convert the corpus to lowercase to facilitate sentiment analysis
+ClientNameUniText.corp = tm_map(ClientNameUniText.corp,content_transformer(tolower))
+
+#remove stopwords
+ClientNameUniText.corp = tm_map(ClientNameUniText.corp,removeWords,stopwords("english"))
+
+#convert to dataframe
+ClientNameUniText.corp = data.frame(ClientNameComments = get("content",ClientNameUniText.corp),stringsAsFactors = FALSE)
+
+#remove excess spacing
+ClientNameUniText.corp = sapply(ClientNameUniText.corp, function(x) gsub("\\s+", " ",x))
+
+#split stop-word-cleaned free text into elements to identify custom valence terms
+FreeTextFreqTable = function(CorporaToClean) {
+
+  #free text has to be in matrix form
+  CorporaToClean = as.matrix(CorporaToClean)
+
+  #separate each row string of text at every instance of white space
+  Sep_at_Spaces = strsplit(CorporaToClean, " ")
+  
+  #remove structure to identify high frequency terms
+  Terms = unlist(Sep_at_Spaces)
+  
+  #generate a frequency table
+  Freq_of_terms = table(Terms)
+
+  #put them in a user friendly matrix, order them for selection
+  Freq_of_terms_tbl = as.matrix(Freq_of_terms)
+  Freq_of_terms_tbl = as.matrix(Freq_of_terms_tbl[order(-Freq_of_terms_tbl),])
+
+}
+
+#get the frequency table from the message field of scrapped FB data
+ClientNameTextTbl = FreeTextFreqTable(ClientNameUniText.corp)
+
+#write.csv(ClientNameTextTbl, "ClientName.comment.terms.csv")
+
+#use the .csv file for custom lists of valence terms, save as Pos-Neg
+
+PosNeg = read.csv("ClientName.comment.terms.Pos-Neg.csv", header = TRUE, stringsAsFactors = FALSE)
+
+#extract the custom vectors of sentiment terms
+NegTerms = PosNeg[PosNeg[,1] != "",1]
+
+PosTerms = PosNeg[PosNeg[,2] != " " & PosNeg[,2] != "",2] 
+
+#run sentiment analysis on each comment; note that the model is preliminary
+ClientNameSent = sapply(ClientNameText, function(x) calculate_custom_sentiment(x, PosTerms, NegTerms)[2])
+
+#extract the sentiment assessments from the output, as a character vector
+ClientNameMsg = c(); for(i in 1:length(ClientNameSent)) ClientNameMsg[i] = as.character(levels(ClientNameSent[[i]]))
+
+#tune the sentiment calculator by changing terms in the custom polarity dictionary
+table(ClientNameMsg)
+
+#combine with original data for comparison
+ClientNameFBdataSen = cbind(ClientNameFBdata[,1:3],"sentiment" = ClientNameMsg,
+                           ClientNameFBdata[,4:ncol(ClientNameFBdata)])
+
+#remove ClientName sourced posts for an assessment of external party sentiment
+ClientNameFBdataExClientName = ClientNameFBdataSen[ClientNameFBdataSen[,"from_name"] != "ClientName",]
+
+table(ClientNameFBdataExClientName[,"sentiment"])
+
+#convert time stamps to dates
+ClientNameFBdataExClientName[,"created_time"] = as.Date(ClientNameFBdataExClientName[,"created_time"])
+
+#generate the dates that will encompass a weekly bin of sentiment values
+FstDt = KeywordIndexes[,"Date"]
+SecDt = KeywordIndexes[,"Date"] + 7
+
+ClientNameFBdataExClientName[,"sentiment"] = as.character(ClientNameFBdataExClientName[,"sentiment"])
+
+#generate a list of 1 week bins
+ClientNameSentlist = list()
+for(i in 1:length(FstDt)){
+  ClientNameSentlist[[i]] = ClientNameFBdataExClientName[which(ClientNameFBdataExClientName[,"created_time"] >= FstDt[i] & 
+  ClientNameFBdataExClientName[,"created_time"] < SecDt[i]),"sentiment"]
+}
+
+#convert character sentiment to numeric
+CharV = c("Very Negative","Negative","Neutral","Positive","Very Positive")
+NumbV = c("-2","-1","0","1","2")
+
+for(i in 1:length(CharV)) ClientNameSentlist = lapply(ClientNameSentlist, function(x) gsub(paste("^",CharV[i],"$", sep = ""), NumbV[i], x))
+
+ClientNameSentlist = lapply(ClientNameSentlist, function(x) as.numeric(x))
+
+#sum the numeric values to determine each week's sentiment index
+ClientNameWkSent = c()
+for(i in 1:length(ClientNameSentlist)) ClientNameWkSent[i] = sum(as.vector(ClientNameSentlist[[i]]))
+
+#attach sentiment indexes to google trends data
+KeywordIndexes$sentiment = ClientNameWkSent
+
+#find the proportion of all messages corresponding to each week
+Prop = unlist(lapply(ClientNameSentlist, function(x) length(x)))
+Prop = 100 * Prop / length(unlist(ClientNameSentlist))
+
+#weight weekly sentiment values with comment count proportions
+#reduces weekly sentiment inflation of a few very pos/neg comments
+KeywordIndexes$sentiment = KeywordIndexes$sentiment * Prop
+
+#end of sentiment analysis
+##############################################################################
+
+Anonymization of client code in progress. Will provide update when complete.
