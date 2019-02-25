@@ -231,5 +231,613 @@ KeywordIndexes$sentiment = KeywordIndexes$sentiment * Prop
 
 #end of sentiment analysis
 ##############################################################################
+#begin data integration
+
+#the data
+st = read.csv("St.csv", header = TRUE)
+st = st[,-which(names(st) %in% c("X","CS"))] #remove unary vars
+
+#remove punctuation from character variables
+st$G = as.factor(gsub("\\.", "", st$G))
+st$Pr = as.factor(gsub("\\$", "", st$Pr))
+
+#as per guidance, we can treat all st FB as PdS
+#to make this work using factors instead of character strings
+#add PdS to the factors of the variable
+levels(st$SuC) = c(levels(st$SuC), "PdS")
+
+#find rows where SuC is FB and replace it with PdS
+st[st$SuC == "FB","SuC"] = "PdS"
+
+#remove FB from the variable levels, this resets the factor levels to only those present
+st$SuC = factor(st$SuC)
+
+#merge the Ch and SuC columns for both dfs
+st$ChSuCh = as.factor(paste(st$Ch, st$SuC))
+
+#update the list of factor names
+levels(st$ChSuCh) = c(levels(st$ChSuCh), "PdS", "T")
+
+#replace the ones you don't want
+st[st$ChSuCh == "PdS PdS","ChSuCh"] = "PdS"
+st[st$ChSuCh == "T T","ChSuCh"] = "T"
+
+#remove the ones no longer used
+st$ChSuCh = factor(st$ChSuCh)
+
+#remove unnecessary original variables
+st = st[,-which(names(st) %in% c("Ch","SuC"))]
+
+#re data
+re = read.csv("Re.csv", header = TRUE)
+re = re[,-which(names(re) %in% c("SL"))]
+
+#remove punctuation from G, Pr
+re$G = as.factor(gsub("\\.", "", re$G))
+re$Pr = as.factor(gsub("\\$", "", re$Pr))
+re$Pr = as.factor(gsub("\\%", " percent", re$Pr))
+
+#as per guidance, remove RS from PoS
+re = re[-which(re$PoS == "RS"),]
+
+#same factor conversion for re data
+re$ChSuCh = as.factor(paste(re$Ch, re$SuC))
+
+#update
+levels(re$ChSuCh) = c(levels(re$ChSuCh), "Af",
+                                       "FR", "OD", "PdS", "SD")
+#replace
+re[re$ChSuCh == "Af Af","ChSuCh"] = "Af"
+re[re$ChSuCh == "FR FR","ChSuCh"] = "FR"
+re[re$ChSuCh == "OD OD","ChSuCh"] = "OD"
+re[re$ChSuCh == "PdS PdS","ChSuCh"] = "PdS"
+re[re$ChSuCh == "SD SD","ChSuCh"] = "SD"
+
+#remove the replaced
+re$ChSuCh = factor(re$ChSuCh)
+
+#remove originals
+re = re[,-which(names(re) %in% c("Ch","SuC", "PoS"))]
+
+#################################################################
+#pivot tables
+
+#re: pivot table of ACT by date and all possible combinations of categories
+re.pivot.act = cast(re, Date ~ ChSuCh + G + CS + Pr, value = "V.A")
+
+#re: do the same for AC costs
+re.pivot.cst = cast(re, Date ~ ChSuCh + G + CS + Pr, value = "AC")
+
+#re: confirm that all the column names are equivalent for AC and cost
+length(which(names(re.pivot.act) == names(re.pivot.cst)))
+
+#re: append an ACT designator to the col names for AC
+for (i in 1:length(re.pivot.act)) {
+  colnames(re.pivot.act)[i] = paste(colnames(re.pivot.act)[i], ".ACT", sep = "")
+}
+
+#re: append designator for costs
+for (i in 1:length(re.pivot.cst)) {
+  colnames(re.pivot.cst)[i] = paste(colnames(re.pivot.cst)[i], ".ACC", sep = "")
+}
+
+#re: replace NAs with 0s
+re.pivot.act[is.na(re.pivot.act)] = 0
+re.pivot.cst[is.na(re.pivot.cst)] = 0
+
+#re: find the aggregates for a given week, append them to the pivot table
+re.pivot.act$VACT = rowSums(re.pivot.act[,2:length(re.pivot.act)])
+re.pivot.cst$ACC = rowSums(re.pivot.cst[,2:length(re.pivot.cst)])
+
+#st: pivot table of IM by date and all possible combinations of categories
+st.pivot.imp = cast(st, Date ~ ChSuCh + G + Pr, value = "IM")
+
+#now the same for MS
+st.pivot.spd = cast(st, Date ~ ChSuCh + G + Pr, value = "MS")
+
+#st: confimn that all the column names are equivalent for IM and spend
+length(which(names(st.pivot.imp) == names(st.pivot.spd)))
+
+#st: append an ACT designator to the col names for IM
+for (i in 1:length(st.pivot.imp)) {
+  colnames(st.pivot.imp)[i] = paste(colnames(st.pivot.imp)[i], ".IM", sep = "")
+}
+
+#st: append designator for spd
+for (i in 1:length(st.pivot.spd)) {
+  colnames(st.pivot.spd)[i] = paste(colnames(st.pivot.spd)[i], ".MSP", sep = "")
+}
+
+#st: replace NAs with 0s
+st.pivot.imp[is.na(st.pivot.imp)] = 0
+st.pivot.spd[is.na(st.pivot.spd)] = 0
+
+#re: find the aggregates for a given week, append them to the pivot table
+st.pivot.imp$IM = rowSums(st.pivot.imp[,2:length(st.pivot.imp)])
+st.pivot.spd$MS = rowSums(st.pivot.spd[,2:length(st.pivot.spd)])
+
+#integrate datasets for modeling
+ClientName.pivot.table = cbind(re.pivot.act, re.pivot.cst[,2:length(re.pivot.cst)], st.pivot.imp[,2:length(st.pivot.imp)], st.pivot.spd[,2:length(st.pivot.spd)])
+
+#how many VACT during this period?
+sum(re.pivot.act$VACT)
+#how much did it cost them to acquire ACT?
+sum(re.pivot.cst$ACC)
+#how many IM did they generate?
+sum(st.pivot.imp$IM)
+#marketing spend to generate IM?
+sum(st.pivot.spd$MS)
+
+#find sums for each combination of variables (C, ACT, IM, MSP)
+PivotColSums = function(CNPT){
+  
+  Df = colSums(CNPT[2:length(CNPT)])
+  Df = c(nrow(CNPT),Df) #to complete dataset add count of total dates
+  Df = data.frame(Df) #convert to dataframe
+  Df
+}
+
+AllColSums = PivotColSums(ClientName.pivot.table)
+
+#how many columns add to zero?
+length(which(AllColSums == 0))
+
+#find unvary variables, use this vector as an index for location in pivot table
+FindAllZeros = which(AllColSums == 0)
+
+#get variable names of unaries, by index values
+ZeroRowNames = colnames(ClientName.pivot.table)[FindAllZeros]
+
+#remove all zero columns from the pivot table
+ClientName.pivot.table = ClientName.pivot.table[,-which(names(ClientName.pivot.table) %in% ZeroRowNames)]
+
+#rename date variable
+colnames(ClientName.pivot.table)[1] = "Date"
+
+#rerun to remove all zero columns from AllColSums
+AllColSums = PivotColSums(ClientName.pivot.table)
+
+#now build a correlation matrix for all combinations
+All.Correlations = cor(ClientName.pivot.table[,2:length(ClientName.pivot.table)])
+
+#end of pivot table generation, correlation matrices, column sums for each factor combo
+###############################################################################
+
+##############################################################################
+##subset the pivot table of time series objects by any desired variable
+
+#pull the factor levels as terms to match in the pivot table column names
+#pull AC and V.A from these
+reG = levels(re$G)
+reChaSub = levels(re$ChSuCh)
+reCSG = levels(re$CS)
+rePr = levels(re$Pr)
+#remove the $ symbol so grep() can be used
+rePr = gsub("\\$", "", rePr)
+rePr = gsub("\\%", " percent", rePr)
+
+#pull IM and MS from these
+stGG = levels(st$G)
+stChanSub = levels(st$ChSuCh)
+stPr = levels(st$Pr)
+
+#identify columns with target variable and factor
+#a numeric list of columns where the level (subset criteria) is found in the pivot table
+#e.g. Subsetcriteria = "CityA" or "PromoA", finds every col name that contains that info
+GrepSubset = function(SubsetCriteria) {
+  grep(SubsetCriteria, names(ClientName.pivot.table))
+}
+
+#rather than do it for each variable and factor individually, sapply the above function
+#to the dataset, generate a list of index values for column names that contain each level
+ListofDFsGenerator = function(LevelsToInput) {
+  ListToOutput = list()
+  for (i in 1:length(LevelsToInput)) {
+    ListToOutput[[i]] = GrepSubset(LevelsToInput[i])
+  }
+  return(ListToOutput)
+}
+
+#execute the ListGenerator, which executes GrepSubset for all levels in each variable
+re.GS = ListofDFsGenerator(reGG)     #list of lists, each list greps a variable's columns
+re.SubChs = ListofDFsGenerator(reChaSub)
+re.CSSG = ListofDFsGenerator(reCSG)
+re.Prs = ListofDFsGenerator(rePr)
+st.GS = ListofDFsGenerator(stGG)
+st.SubChs = ListofDFsGenerator(stChanSub)
+st.Prs = ListofDFsGenerator(stPr)            #all var levels captured & grepd
+
+#a function that generates subsets from pivot table that correspond to a G, segment, Pr, or subCh
+Aggregates = function(VN,VC) {
+
+  #use the location values to subset a pivot table by a desired variable or factor
+  VN = as.vector(VC)
+
+  #see what is going on in a given city
+  VD = ClientName.pivot.table[,VN]
+  VD = cbind(ClientName.pivot.table[1], VD)
+
+  #find the subset in the data that corresponds to VACT, get the total ACT for each date
+  #cbind to the dataframe
+  VD$ACT = rowSums(VD[, grep("ACT", colnames(VD))])
+
+  #do the same for IM, MS, and ACC
+  VD$IM = rowSums(VD[, grep("IM", colnames(VD))])
+  VD$MS = rowSums(VD[, grep("MSP", colnames(VD))])
+  VD$ACC = rowSums(VD[, grep("ACC", colnames(VD))])
+  return(VD)
+}
+
+#run the Aggregator on every variable level, group pivot table columns
+#appends counts for each numeric metric in the dataset (e.g. ACT, IM)
+#inputs are the variable levels, e.g. st.G[1] = CityA
+#grep index values for each level in st.G (columns where a level is found)
+AggregateGenerator = function(InputLevels, InputGreps) {
+  Levels = list()
+  for (i in 1:length(InputLevels)) {
+    Levels[[i]] = Aggregates(InputLevels[i],InputGreps[[i]])
+  }
+  return(Levels)
+}
+
+st.DMA = AggregateGenerator(stGG, st.GS)
+#name list elements their corresponding G
+names(st.DMA) = stGG
+
+st.Chs = AggregateGenerator(stChanSub, st.SubChs)
+names(st.Chs) = st.ChanSub
+
+st.Pr = AggregateGenerator(stPr, st.Prs)
+names(st.Pr) = stPr
+
+re.DMA = AggregateGenerator(reG, re.GS)
+names(re.DMA) = reG
+
+re.Chs = AggregateGenerator(reChaSub, re.SubChs)
+names(re.Chs) = reChaSub
+
+re.CSSG = AggregateGenerator(reCSG, re.CSSG)
+names(re.CSSG) = reCSG
+
+re.Pr = AggregateGenerator(rePr, re.Prs)
+names(re.Pr) = rePr
+
+#put aggregates across all Chs, Prs, etc. into a single df by metric (IM)
+#then do the same for other metrics: ACC, IM, ACT, MS
+#st.DMA[["CityA"]]["IM"]; st.DMA[["CityA"]]["MS"]; #etc.
+
+#bind all the city IM into a single df
+IMByG = cbind(st.DMA[["CityA"]]["IM"],
+                               st.DMA[["CityB"]]["IM"],
+                               st.DMA[["CityC"]]["IM"],
+                               st.DMA[["CityD"]]["IM"],
+                               st.DMA[["CityE"]]["IM"],
+                               st.DMA[["CityF"]]["IM"],
+                               st.DMA[["CityG"]]["IM"],
+                               st.DMA[["CityH"]]["IM"],
+                               st.DMA[["CityI"]]["IM"],
+                               st.DMA[["CityJ"]]["IM"],
+                               st.DMA[["CityK"]]["IM"],
+                               st.DMA[["CityL"]]["IM"],
+                               st.DMA[["CityM"]]["IM"],
+                               st.DMA[["CityN"]]["IM"],
+                               st.DMA[["CityO"]]["IM"],
+                               st.DMA[["CityP"]]["IM"],
+                               st.DMA[["CityQ"]]["IM"],
+                               st.DMA[["CityR"]]["IM"],
+                               st.DMA[["CityS"]]["IM"],
+                               st.DMA[["CityT"]]["IM"],
+                               st.DMA[["CityU"]]["IM"],
+                               st.DMA[["CityV"]]["IM"])
+
+#assign them G names
+names(IMByG) = levels(st$G)
+
+#IM by DMA
+#count matches IM in st data
+sum(colSums(IMByG))
+sum(st$IM)
+
+#consolidate by factors
+Cons.fun = function(Data,Subset,Factor){
+  
+  MSByX = Data[[Subset]][Factor]
+  foreach( x = 2:length(Data), .combine = cbind) %do% {
+   MSByX[x] = Data[[x]][Factor] 
+  }
+  MSByX
+}
+#MS by DMA
+MSByG = Cons.fun(st.DMA,"CityA","MS")
+#assign them G names
+names(MSByG) = levels(st$G)
+
+#run the same code sum() comparison for each aggregation to ensure integrity
+sum(colSums(MSByG))
+sum(st$MS)
+
+#note: wherever you get a variable pulling from the wrong dataset, remove it
+#e.g. re.GS$IM is wrong, only pull st.GS$IM
+#similarly, st.SubChs$V.A is wrong, should only be re.SubChs$V.A
+
+#generate the same time series matrices for st subChs
+IMBySubCh = Cons.fun(st.Chs,"OD Content","IM")
+names(IMBySubCh) = levels(st$ChSuCh)
+
+#IM by subCh
+sum(colSums(IMBySubCh))
+sum(st$IM)
+
+#MS by SubCh
+MSBySubCh = Cons.fun(st.Chs,"OD Content","MS")
+names(MSBySubCh) = levels(st$ChSuCh)
+
+#run the same code sum() comparison for each aggregation to ensure integiry
+sum(colSums(MSBySubCh))
+sum(st$MS)
+
+#for stPr
+IMByPr = Cons.fun(st.Pr,"PR1","IM")
+names(IMByPr) = levels(st$Pr)
+
+#IM by Pr
+sum(colSums(IMByPr))
+sum(st$IM)
+
+MSByPr = Cons.fun(st.Pr,"PR1","MS")
+names(MSByPr) = levels(st$Pr)
+
+#ensure integrity
+sum(colSums(MSByPr))
+sum(st$MS)
+
+#for re.DMAs
+ACTByG = Cons.fun(re.DMA,"CityA","ACT")
+names(ACTByG) = levels(re$G)
+
+#ACT by G
+sum(colSums(ACTByG))
+sum(re$V.A)
+
+ACCByG = Cons.fun(re.DMA,"CityA","ACC")
+names(ACCByG) = levels(re$G)
+
+#ACC by G
+sum(colSums(ACCByG))
+sum(re$AC)
+
+#for re.subChs
+ACTBySubCh = Cons.fun(re.Chs,"PSB","ACT")
+names(ACTBySubCh) = levels(re$ChSuCh)
+
+#ACT by G
+sum(colSums(ACTBySubCh))
+sum(re$V.A)
+
+ACCBySubCh = Cons.fun(re.Chs,"PSB","ACC")
+names(ACCbySubCh) = levels(re$ChSuCh)
+
+#ACC by G
+sum(colSums(ACCbySubCh))
+sum(re$AC)
+
+#for re.CS
+ACTByCSG = Cons.fun(re.CSSG,"AL","ACT")
+names(ACTByCSG) = levels(re$CS)
+
+#ACT by G
+sum(colSums(ACTByCSG))
+sum(re$V.A)
+
+ACCByCSG = Cons.fun(re.CSSG,"AL","ACC")
+names(ACCbyCSG) = levels(re$CS)
+
+#ACC by G
+sum(colSums(ACCbyCSG))
+sum(re$AC)
+
+#for re.Prs
+ACTByPr = Cons.fun(re.Pr,"PR1","ACT")
+names(ACTByPr) = levels(re$Pr)
+
+#ACT by G
+sum(colSums(ACTByPr))
+sum(re$V.A)
+
+ACCByPr = Cons.fun(re.Pr,"PR1","ACC")
+names(ACCbyPr) = levels(re$Pr)
+
+#ACC by G
+sum(colSums(ACCbyPr))
+sum(re$AC)
+
+#use these to get the column names from the list of lists
+#names(re.Chs[[1]])[130]
+#levels(re$Pr)
+
+#metric designator to the col names for each df, for aggregation of all dfs
+AppendDesignator = function(dfName,Designator) {
+  for (i in 1:length(dfName)) {
+    colnames(dfName)[i] = paste(colnames(dfName)[i], Designator, sep = "")
+  }
+  return(dfName)
+}
+IMByG = AppendDesignator(IMByG,".IM")
+IMBySubCh = AppendDesignator(IMBySubCh,".IM")
+IMByPr = AppendDesignator(IMByPr,".IM")
+
+MSByG = AppendDesignator(MSByG,".MS")
+MSBySubCh = AppendDesignator(MSBySubCh,".MS")
+MSByPr = AppendDesignator(MSByPr,".MS")
+
+ACTByG = AppendDesignator(ACTByG,".ACT")
+ACTBySubCh = AppendDesignator(ACTBySubCh,".ACT")
+ACTByCSG = AppendDesignator(ACTByCSG,".ACT")
+ACTByPr = AppendDesignator(ACTByPr,".ACT")
+
+ACCbyG = AppendDesignator(ACCbyG,".ACC")
+ACCbySubCh = AppendDesignator(ACCbySubCh,".ACC")
+ACCbyCSG = AppendDesignator(ACCbyCSG,".ACC")
+ACCbyPr = AppendDesignator(ACCbyPr,".ACC")
+
+#the complete data set ready for conversion to time series
+IMAsTS = cbind.data.frame("Date" = ClientName.pivot.table[,"Date"], IMByG,
+                                   IMBySubCh, IMByPr)
+
+MSAsTS = cbind.data.frame("Date" = ClientName.pivot.table[,"Date"], MSByG,
+                                      MSBySubCh, MSByPr)
+
+ACTAsTS = cbind.data.frame("Date" = ClientName.pivot.table[,"Date"], ACTByG,
+                                   ACTBySubCh, ACTByCSG, ACTByPr)
+
+ACCAsTS = cbind.data.frame("Date" = ClientName.pivot.table[,"Date"], ACCbyG,
+                                       ACCbySubCh, ACCbyCSG,
+                                       ACCbyPr)
+
+NationalAggregates = cbind.data.frame("Date" = ClientName.pivot.table[,"Date"],
+                           "ACT" = ClientName.pivot.table[,"VACT"],
+                           "MS" = ClientName.pivot.table[,"MS"],
+                           "ACC" = ClientName.pivot.table[,"ACC"],
+                           "IM" = ClientName.pivot.table[,"IM"])
+
+#confirm that the values in each week's aggregates are accurate when compared to the original data
+sum(st[which(st$G == "CityA" & st$Date == "xxxx-xx-xx"), "MS"])
+MSAsTS$CityA.MS[which(MSAsTS$Date == "xxxx-xx-xx")]
+
+###########################################################################################
+#final data integration
+
+#convert fb likes data into weeks
+#read in the window of time that matches dataset
+FixedClientNameFBData = ClientNameFBdata
+
+#use alternative sentiment analysis results to compare with RSentiment results from above
+FixedClientNameFBSent = read.csv("ClientName.facebook_sentiment.csv", header = TRUE, stringsAsFactors = FALSE)
+
+#subset to get likes, comments, shares counts to aggregate
+FixedFBvars = c("created_time","likes_count", "comments_count", "shares_count")
+FixedClientNameFBData = FixedClientNameFBData[,FixedFBvars]
+
+#convert fb time character data into posixlt posixt data objects
+class(strptime(FixedClientNameFBData$created_time[1], format = "%Y-%m-%dT%H:%M:%S"))
+
+FixedClientNameFBDatacreated_time = strptime(FixedClientNameFBData$created_time,
+                                      format = "%Y-%m-%dT%H:%M:%S")
+FixedClientNameFBSentdate = strptime(FixedClientNameFBSent$date,
+                              format = "%m/%d/%Y")
+#remove time vars for conversion to ts
+FixedClientNameFBData = FixedClientNameFBData[,-1]
+FixedClientNameFBSent = FixedClientNameFBSent[,-1]
+
+#turn data into xts object ordered by date
+FixedClientNameFBDataTS = xts(x = FixedClientNameFBData, order.by = FixedClientNameFBDatacreated_time)
+FixedClientNameFBSentTS = xts(x = FixedClientNameFBSent, order.by = FixedClientNameFBSentdate)
+
+#convert the xts into weekly data
+FixedClientNameFBDataWeekly = apply.weekly(FixedClientNameFBDataTS, colSums)
+FixedClientNameFBSentWeekly = apply.weekly(FixedClientNameFBSentTS, colSums)
+
+#extract the aggregates to append them to the regressor dataset
+extractFBMetrics = function(ListofData) {
+  List1 = List2 = List3 = c()
+  for (i in 1:nrow(ListofData)) {
+    List1[i] = ListofData[i][[1]]
+    List2[i] = ListofData[i][[2]]
+    List3[i] = ListofData[i][[3]]
+  }
+  List = cbind(List1, List2, List3)
+  return(List)
+}
+
+FixedWeekList = list()
+FixedWeekList = extractFBMetrics(FixedClientNameFBDataWeekly)
+colnames(FixedWeekList) = c("Likes", "Comments", "Shares")
+FixedWeekList = as.data.frame(FixedWeekList)
+
+extractSentiment = function(ListofData) {
+  List1 = List2 = c()
+  for (i in 1:nrow(ListofData)) {
+    List1[i] = ListofData[i][[1]]
+    List2[i] = ListofData[i][[2]]
+  }
+  List = cbind(List1, List2)
+  return(List)
+}
+
+FixedSentList = list()
+FixedSentList = extractSentiment(FixedClientNameFBSentWeekly)
+colnames(FixedSentList) = c("NegativeSentimentComments", "PositiveSentimentComments")
+FixedSentList = as.data.frame(FixedSentList)
+
+#bind the FB counts and sentiment data together
+ClientNameFBAggregates = cbind.data.frame(FixedWeekList, FixedSentList)
+
+#bring in google trends data and sentiment data
+ClientName.goog.trends = KeywordIndexes
+
+#aggregate FB and goog data
+AllSentimentData = cbind.data.frame(ClientNameFBAggregates,
+                                    ClientName.goog.trends[2:length(ClientName.goog.trends)])
+
+#bring in weekly unemployment claims
+UnemplClaims = read.csv("WeeklyClaimsByState.csv", stringsAsFactors = FALSE)
+#remove the high correlation variables from unemployment (Covered claims)
+UnempRemove = grep("Covered", colnames(UnemplClaims))
+UnemplClaims = UnemplClaims[,-which(names(UnemplClaims) %in% names(UnemplClaims)[UnempRemove])]
+
+#bring in coincident index
+Coincident = read.csv("Coincident Index (for TS).csv", header = TRUE)
+colnames(Coincident) = sapply(colnames(Coincident), paste, ".coincident", sep = "")
+
+#combine national aggregates with all acq,act,mkt,impr, fb, googtrends, unempl. coincident data
+AllData = cbind.data.frame(NationalAggregates, ACTAsTS[,2:length(ACTAsTS)],
+                           IMAsTS[,2:length(IMAsTS)],
+                           MSAsTS[2:length(IMAsTS)],
+                           ACCAsTS[,2:length(ACCAsTS)],
+                           AllSentimentData,
+                           UnemplClaims[,2:length(UnemplClaims)],
+                           Coincident[,2:length(Coincident)])
+
+AllData$Date = as.Date(AllData$Date, format = "%Y-%m-%d")
+
+#blanks create a problem later, replace them
+names(AllData) = gsub(" ", ".", names(AllData))
+
+#vars that start with numbers also create a problem
+colnames(AllData) = gsub("15\\.", "Fifteen.", colnames(AllData))
+colnames(AllData) = gsub("25\\.", "TwentyFive.", colnames(AllData))
+colnames(AllData) = gsub("30\\.", "Thirty.", colnames(AllData))
+colnames(AllData) = gsub("75\\.", "SeventyFive.", colnames(AllData))
+colnames(AllData) = gsub("2\\.", "Two.", colnames(AllData))
+colnames(AllData) = gsub("-", "", colnames(AllData))
+
+#some columns were read in as characters, convert to numerics
+for (i in 1:length(AllData)) {
+  if (class(AllData[,i]) != "numeric" & class(AllData[,i]) != "Date") {
+    AllData[,i] = as.numeric(AllData[,i])
+  }
+}
+#gsub alters data format, convert back to date
+AllData$Date = as.Date(AllData$Date, format = "%Y-%m-%d")
+
+#find unary variable with zeros, remove them
+Summations = c()
+for (i in 1:(length(AllData) - 1)) Summations[i] = sum(AllData[,i + 1])
+
+Summations = c(105, Summations) #append the count of total dates
+
+UnaryCount = grep("\\b0\\b", Summations) #zero only variables
+colnames(AllData)[UnaryCount] #draw their names from column names
+
+#remove unary columns from AllData
+UnaryVariables = c("PSB.ACC", "PSNB.ACC",
+                   "FR.ACC", "OD.ACC",
+                   "PS.ACC", "SD.ACC")
+
+#remove unary variables
+AllData = AllData[,-which(names(AllData) %in% UnaryVariables)]
+
+#end of data integration
+########################################################################
 
 Anonymization of client code in progress. Will provide update when complete.
