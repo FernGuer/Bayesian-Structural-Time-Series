@@ -1300,8 +1300,7 @@ write.csv(Correlations, "ClientNamePivotCorrelations.csv")
 
 ########################################################################
 
-#beginning of single data frame bsts model as built by Kim Laarsens @
-#https://kim...
+#beginning of single data frame bsts model as shared by Kim Larsen in 2016
 
 AllTargetVars = AllTargetVars2
 #cbind re variables from AllTargetVars into data frame with regressors
@@ -1406,7 +1405,8 @@ summary(impact)
 summary(impact, "report")
 
 
-#citation: CausalImpact 1.1.3, Brodersen et al., Annals of Applied Statistics (2015). http://google.github.io/CausalImpact/”
+#citation: CausalImpact 1.1.3, Brodersen et al., Annals of Applied Statistics (2015). http://google.github.io/CausalImpact/
+#citation: Larsen, Kim (2016). "Sorry ARIMA, but I'm going Bayesian." https://multithreaded.stitchfix.com/blog/2016/04/21/forget-arima/
 #################################################################################
 #run plsr (PCA + regression) on each dataframe
 
