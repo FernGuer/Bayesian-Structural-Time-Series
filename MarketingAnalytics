@@ -840,4 +840,780 @@ AllData = AllData[,-which(names(AllData) %in% UnaryVariables)]
 #end of data integration
 ########################################################################
 
-Anonymization of client code in progress. Will provide update when complete.
+#Begin EDA
+
+#generate plots for all pivot table elements through productA keyword, write out to img files
+AllPlots = list()
+for (i in 1:100) {
+  AllPlots = print(ggplot(data = as.data.frame(AllData[,i])) +
+                          geom_line(aes(x = decimal_date(ymd(ClientName.pivot.table[,"Date"])),
+                                        y = AllData[,i])) +
+                          ggtitle(names(AllData)[i]) +
+                          xlab("Observation Week") +
+                          ylab(names(AllData)[i]))
+
+  file_name = paste("AllPlots",i,".png",sep="")
+  png(file_name)
+  print(AllPlots)
+  dev.off()
+}
+
+#can conversions/IM seasonality be normalized?
+#rate of IM to conversion over time? on a per mille basis:
+IRatioByWeek = 100*(AllData[,"ACT"] / (AllData[,"IM"]/1000))
+
+IRatioByWeek = zoo(x = IRatioByWeek, order.by = AllData[,"Date"])
+
+plot(x = decimal_date(ymd(AllData[,"Date"])), y = IRatioByWeek, type = "l",
+     main = "VACT to 1000 IM Ratio By Week", xlab = " Decimal Date",
+     ylab = "Ratio of ACT to PMIM")
+
+#Append ACT to per mille IM to AllData
+AllData$ACTPMIM = IRatioByWeek
+
+#CPI by Ch?
+#weekly
+FindRatios = function(o,p) o / p
+RemNaN = function(Ch) Ch[is.nan(Ch)] = 0
+
+ICByChanODC = mapply(FindRatios, AllData$OD.C.MS,(AllData$OD.C.IM/1000))
+ICByChanODC = RemNaN(ICByChanODC)
+
+ICByChanODP = mapply(FindRatios, AllData$OD.Psp.MS,(AllData$OD.Psp.IM/1000))
+ICByChanODP = RemNaN(ICByChanODP)
+
+ICByChanPSB = mapply(FindRatios, AllData$PSB.MS,(AllData$PSB.IM/1000))
+ICByChanPSB = RemNaN(ICByChanPSB)
+
+ICByChanPSN = mapply(FindRatios, AllData$PSNB.MS,(AllData$PSNB.IM/1000))
+ICByChanPSN = RemNaN(ICByChanPSN)
+
+ICByChanPSO = mapply(FindRatios, AllData$PS.MS,(AllData$PS.IM/1000))
+ICByChanPSO = RemNaN(ICByChanPSO)
+
+ICByChanTVS = mapply(FindRatios, AllData$TV.MS,(AllData$TV.IM/1000))
+ICByChanTVS = RemNaN(ICByChanTVS)
+
+ICsByChanTS = cbind.data.frame("Date" = as.Date(ClientName.pivot.table[,"Date"]),
+                                           "CPIByChan.Content" = ICByChanODC,
+                                           "CPIByChan.Prsp" = ICByChanODP,
+                                           "CPIByChan.BS" = ICByChanPSB,
+                                           "CPIByChan.NOBS" = ICByChanPSN,
+                                           "CPIByChan.PS" = ICByChanPSO,
+                                           "CPIByChan.TV" = ICByChanTVS)
+
+#append CPI by Ch to AllData
+AllData = cbind.data.frame(AllData, ICsByChanTS[,2:length(ICsByChanTS)])
+
+#graphically it looks like this
+dev.new()
+dev.off()
+ggplot(ICsByChanTS, aes(x = Date, y = 'CPI', color = "CPIByChan.Content")) + geom_line() + ggtitle("CPM IM By SubCh") +
+  geom_line(data = ICsByChanTS, aes(Date, CPIByChan.Prsp,
+                                                color = "CPIByChan.Prsp")) +
+  geom_line(data = ICsByChanTS, aes(Date, CPIByChan.BS,
+                                                color = "CPIByChan.BS")) +
+  geom_line(data = ICsByChanTS, aes(Date, CPIByChan.NOBS,
+                                                color = "CPIByChan.NOBS")) +
+  geom_line(data = ICsByChanTS, aes(Date, CPIByChan.PS,
+                                                color = "CPIByChan.PS")) +
+  geom_line(data = ICsByChanTS, aes(Date, CPIByChan.TV,
+                                                color = "CPIByChan.TV")) +
+  scale_color_manual(values = c("red", "navyblue", "green4","deeppink4","black","orange"))
+
+#Prop of NL per week?
+NLPropofAllACT = AllData$NL.ACT / AllData$ACT
+
+#append this metric to AllData
+AllData$NLProp.ACT = NLPropofAllACT
+
+plot(x = AllData$Date, y = AllData$NLProp.ACT, type = "l",
+     main = "NL As Prop of All ACT ", xlab = "Week of Observation",
+     ylab = "Prop of All VACT")
+
+ALPropofAllACT = AllData$AL.ACT / AllData$ACT
+
+#append to AllData
+AllData$ALProp.ACT = ALPropofAllACT
+
+plot(x = AllData$Date, y = ALPropofAllACT, type = "l",
+     main = "AL As Prop of All ACT ", xlab = "Week of Observation",
+     ylab = "Prop of All VACT")
+
+
+CanPropofAllACT = AllData$Can.V.ACT / AllData$ACT
+
+#append this metric to AllData
+AllData$CanVProp.ACT = CanPropofAllACT
+
+plot(x = AllData$Date, y = CanPropofAllACT, type = "l",
+     main = "Can V As Prop of All ACT ", xlab = "Week of Observation",
+     ylab = "Prop of All VACT")
+
+Growth = AllData$ALProp.ACT + AllData$Can.V.ACT.PropNatlACT
+plot(x = AllData$Date, y = Growth, type = "l",
+     main = "Can V + AL As Prop of All ACT ", xlab = "Week of Observation",
+     ylab = "Prop of All VACT")
+
+#Prop ACT from factors in re vars?
+#list of factors in the re dataset + national aggregatate
+GetNames = grep("ACT" , colnames(AllData), ignore.case = TRUE)
+
+#reduce GetNames to only ACT, not Props
+GetNames = GetNames[1:39]
+
+#Prop ACT for each week per factor
+ACTProps = function(GetNames) {
+  Props = list()
+  for (i in 1:length(GetNames)) {
+    Props[[i]] = AllData[,GetNames[i]] / AllData$ACT
+  }
+  return(Props)
+}
+
+#generate a list of lists, length is full time series
+Props = ACTProps(GetNames)
+
+#name each list by source factor
+names(Props) = names(AllData[,GetNames])
+
+AppendPropDesignation = function(dfName) {
+  for (i in 1:length(dfName)) {
+    names(dfName)[i] = paste(names(dfName)[i], ".PropNatlACT", sep = "")
+  }
+  return(dfName)
+}
+
+Props = as.data.frame(AppendPropDesignation(Props))
+
+#append to AllData
+AllData = cbind.data.frame(AllData, Props)
+
+#ACT plots for all factors to identify growth segments, save as png
+ACTPlots = list()
+for (i in 1:length(Props)) {
+    ACTPlots[[i]] = print(ggplot(data = as.data.frame(Props[[i]])) +
+      geom_line(aes(x = decimal_date(ymd(ClientName.pivot.table[,"Date"])),
+                    y = Props[[i]])) +
+      ggtitle(names(Props)[[i]]) +
+      xlab("Observation Week") +
+      ylab("Prop of Total ACT"))
+    
+    file_name = paste("ACTByFactorPlots", i, ".png", sep = "")
+    png(file_name)
+    print(ACTPlots[[i]])
+    dev.off()    
+}
+
+#end EDA
+########################################################################
+#ARIMA Model
+#PdS IM to PSB regression + lags
+
+BuildDfForArima = function(df, n, p) {
+
+  Target = df[,n]
+  Regressor = df[,p]
+  Lag1Regressor = lag(df[,p], 1)
+  Lag1Regressor[1] = (Lag1Regressor[2]/Lag1Regressor[3]) / 2 #estimated value of lag 1
+  Lag2Regressor = lag(df[,p], 2)
+  Lag2Regressor[1] = (Lag2Regressor[3]/Lag2Regressor[4]) / 2 #estimated value of lag 1
+  Lag2Regressor[2] = (Lag2Regressor[3]/Lag2Regressor[4]) / 2 #estimated value of lag 2
+  ArimaModelVars = cbind.data.frame("re" = Target, "Regressor" = Regressor,
+                                    "Lag1Regressor" = Lag1Regressor)#,
+                                    #"Lag2Regressor" = Lag2Regressor)
+
+  ArimaModel = arima(as.ts(Target[1:70]), order = c(1,1,1),
+                     seasonal = list(order = c(0,1,1)),
+                                     xreg = ArimaModelVars[1:70,2:length(ArimaModelVars)],
+                                     optim.control = list(maxit = 1000), method = "ML")
+}
+
+NatlACTMktSp = list()
+NatlACTMktSp = BuildDfForArima(AllData, 2, 3) #national ACT by MS
+NatlACTMktSp$model
+acf(NatlACTMktSp$residuals)
+
+PDSocActPSB = list()
+PDSocActPSB = BuildDfForArima(AllData, 32, 99) #PdS ACT-BSSp
+pacf(PDSocActPSB$residuals)
+
+ODContImpBrSrAct = list()
+ODContImpBrSrAct = BuildDfForArima(AllData, 27, 67) #OD Content IM - BS ACT
+pacf(ODContImpBrSrAct$residuals)
+#end ARIMA
+########################################################################
+#Regression object components
+
+#call, terms, residuals, coefficients[1:n] & t,p values, aliased, sigma, df, r.squared, adj.r.squared, fstatistic, cov.unscaled
+#summary(A)$coefficients[1] # 1 = intercept estimate
+#summary(A[[2]])$coefficients[2] # 2 = beta estimate for 1st regressor
+# 3 = intercept stderror # 4 = beta est, 1st regressor stderror
+# 5 = t value, intercept # 6 = t value, 1st regressor
+# 7 = p value, intercept # 8 = p value, 1st regressor
+
+################################################################################
+
+#example of standard structural time series
+fit = ts(AllData$IM, start = decimal_date(ymd("xxxx-xx-xx")), frequency = xx)
+StdStrucTS = StructTS(fit, type = "BSM")
+summary(StdStrucTS)
+fit$coeff #gives the intercept, regressor coeffs for for each factor equation regressed on its lags
+#also gives the var-covar matrices: variances and covariances
+#parameters and unknowns: RHS coeffs, LHS coeffs,
+
+#StructTS generates the following extractable values:
+#coef, loglik, loglik0, data, residuals, fitted, call, series, code, model,
+#model0, xtsp
+
+IMExFFDOPr = as.numeric(ClientName.pivot.table$IM - FFDO)
+par(mfrow = c(2,2))
+plot(ClientName.pivot.table$IM, col = "blue", type = "o")
+lines(FFDO$IM, col = "black")
+lines(IMExFFDOPr, col = "red")
+
+#correlation between IM and ACT
+cor(ClientName.pivot.table$IM, ClientName.pivot.table$VACT)
+
+################################################################
+
+#################################################################
+#arima and bsts with regressors
+
+#note:your regressors don't have to be ts objects, they can be a simple matrix, but target must be
+
+#it is recommended to use lagged re variable in regression if there is autocorrelation
+LaggedreVars = matrix(0, nrow = nrow(AllData), ncol = length(GetNames))
+
+for (i in 1:length(GetNames)) {
+  LaggedreVars[,i] = lag(AllData[,GetNames[i]], 1)
+}
+
+for (i in 1:ncol(LaggedreVars)) {
+  LaggedreVars[1,i] = sum(LaggedreVars[2,i],LaggedreVars[3,i]) / 2
+}
+
+colnames(LaggedreVars) = names(AllData[,GetNames])
+
+#aggregate variables in AllData you want to use as regressors
+Xregressors = AllData[,-which(names(AllData) %in% names(AllData[,GetNames]))]
+
+#subset to exclude holdout data
+XregressorsSub = Xregressors[1:(nrow(AllData) - 15),]
+
+#loop through all possible regressors to see which are best modeled
+ACTArima = list()
+for (i in 1:length(GetNames)) {
+  #convert ACT to ts, use 316 regressors excluding other ACT but incl. its lag
+  #order(2,1,4) is a better model, but will not converge when using lagged.ACT
+  ACTArima[[i]] = arima(as.ts(AllData[1:(nrow(AllData) - 15),names(AllData[,GetNames[i]])]),
+                               order = c(1,1,1), seasonal = list(order = c(0,1,1),
+                                                                 xreg = cbind(XregressorsSub,
+                                                                 LaggedreVars[1:90,i]),
+                                                         optim.control = list(maxit = 10000)))
+  }
+names(ACTArima) = names(AllData[,GetNames])
+
+#look at the MA and AR components to ID outliers or seasonality
+ACFPlots = list()
+PACFPlots = list()
+for (i in 1:length(ACTArima)) {
+  ACFPlots[[i]] = acf(ACTArima[[i]]$residuals)
+  PACFPlots[[i]] = pacf(ACTArima[[i]]$residuals)
+}
+
+#extract acf values at different lags, find the lowest acf ACT regression (best predicted ACT factor)
+AllACFs = matrix(0, nrow = 20, ncol = 39)
+for (k in 1:39) {
+  for (i in 1:20) {
+    AllACFs[i,k] = ACFPlots[[k]]$acf[i]
+  }
+}
+
+AllPACFs = matrix(0, nrow = 20, ncol = 39)
+for (k in 1:39) {
+  for (i in 1:20) {
+    AllPACFs[i,k] = PACFPlots[[k]]$acf[i]
+  }
+}
+
+AllPACFs = AllPACFs[1:19,]
+MeanACTACF = colMeans(AllACFs)
+MeanACTPACF = colMeans(AllPACFs)
+ACFsAndPACFs = cbind.data.frame(names(AllData[,GetNames]), "Mean ACF ACT Type" = MeanACTACF,
+                                "Mean PACF ACT Type" = MeanACTPACF)
+write.csv(ACFsAndPACFs, "ACFsPACFs.csv")
+ggplot(data = ACFsAndPACFs, aes(x = names(AllData[,GetNames]), y = MeanACTACF)) +
+  geom_bar(stat = "identity", position = "identity") +
+  theme(axis.text.x = element_text(angle = -90, hjust = 0)) +
+  xlab("") + ylab("") + ggtitle("Mean ACF by ACT Type")
+
+ggplot(data = ACFsAndPACFs, aes(x = names(AllData[,GetNames]), y = MeanACTPACF)) +
+  geom_bar(stat = "identity", position = "identity") +
+  theme(axis.text.x = element_text(angle = -90, hjust = 0)) +
+  xlab("") + ylab("") + ggtitle("Mean PACF by ACT Type")
+
+#convert pivot table date to Date class
+Date = ymd(as.character(AllData$Date))
+
+#build a dataframe of fitted and predicted values by date, predicted 15 observations out
+ActvsPred = list()
+for (i in 1:length(ACTArima)) {
+ActvsPred[[i]] = data.frame(c(as.numeric(fitted(ACTArima[[i]])),
+                         as.numeric(predict(ACTArima[[i]], n.ahead = 15)$pred)),
+                       as.numeric(AllData[,GetNames[i]]),
+                       Date)
+}
+
+#name the data frame columns
+for (i in 1:length(ActvsPred)) {
+  names(ActvsPred[[i]]) = c("Fitted", "Actual", "Date")
+}
+
+#mean MAPE
+MeanMAPEs = list()
+for (i in 1:length(ActvsPred)) {
+  MeanMAPEs[[i]] = mean(abs(ActvsPred[[i]]$Actual - ActvsPred[[i]]$Fitted) / ActvsPred[[i]]$Actual)
+}
+MeanMAPEs
+
+#MAPE for the predicted values
+ArimaPredictedMAPE = list()
+for (i in 1:length(ActvsPred)) {
+  ArimaPredictedMAPE[[i]] = filter(ActvsPred[[i]], Date > ymd("xxxx-xx-xx")) %>%
+    summarise(ArimaPredictedMAPE = mean(abs(Actual - Fitted) / Actual))
+}
+
+#Lowest forecast MAPEs
+names(AllData[,GetNames])[3] #CityA.ACT
+names(AllData[,GetNames])[4] #CityF.ACT
+names(AllData[,GetNames])[11] #CityM.ACT
+names(AllData[,GetNames])[12] #CityR.ACT
+names(AllData[,GetNames])[24] #FactorB.ACT
+names(AllData[,GetNames])[29] #FactorD.ACT
+names(AllData[,GetNames])[31] #Can V.ACT
+
+#rename to fit into main titles in graphs
+AllTargetVars2 = names(AllData[,GetNames])
+
+#plot the actual and fit data for all actual and predicted data across all types of ACT
+#label the graphs x,y axes and main title
+ArimaPlots = list()
+for (i in 1:length(AllTargetVars2)) {
+  ArimaPlots[[i]] = print(ggplot(data = ActvsPred[[i]], aes(x = Date)) +
+                          geom_line(aes(y = Actual, colour = "Actual"), size = 1.2) +
+                          geom_line(aes(y = Fitted, colour = "Fitted"), size = 1.2, linetype = 2) +
+                          ggtitle(paste0(AllTargetVars2[i],
+                                         " ARIMA Predicted MAPE Last 15 Obs = ",
+                                         round(100 * ArimaPredictedMAPE[[i]], 2), "%")) +
+                          theme(axis.text.x = element_text(angle = -90, hjust = 0)))
+}
+
+#write them out to image files
+for (i in 1:length(AllTargetVars2)) {
+  file_name = paste("ArimaPlots", i, ".png", sep = "")
+  png(file_name)
+  print(ArimaPlots[[i]])
+  dev.off()
+}
+
+
+#end of ARIMA models
+########################################################################
+
+ACTvsMktSpl = AllData[,c(1:3,98,101,102)]
+
+ACTvsMktSpl$NonProsp = ACTvsMktSpl$MS - ACTvsMktSpl$OD.Psp.MS
+
+ACTvsMktSpl$NonTv = ACTvsMktSpl$MS - ACTvsMktSpl$TV.MS
+
+ACTvsMktSpl$NonPdSoc = ACTvsMktSpl$MS - ACTvsMktSpl$PS.MS
+
+ACTvsMktSpl$NonTvPdSocProsp = ACTvsMktSpl$MS - ACTvsMktSpl$PS.MS - ACTvsMktSpl$TV.MS - ACTvsMktSpl$OD.Psp.MS
+
+cor(ACTvsMktSpl$ACT,ACTvsMktSpl$NonTvPdSocProsp) #.5347 correlation!!
+
+#ACTvsMktSpl = ACTvsMktSpl[order(ACTvsMktSpl$ACT),]
+fit1 = lm(ACT~NonTvPdSocProsp, data = ACTvsMktSpl)
+fit1 = glm(ACT~NonTvPdSoc, data = ACTvsMktSpl, family = "quasipoisson")
+#quasipoisson addressed the over dispersion of residuals (non-normal error distribution)
+#1 coefficients 
+#2 residuals
+#3 effects 
+#4 rank
+#5 fitted.values 
+#6 assign
+#7 qr 
+#8 df.residual
+#9 xlevels 
+#10 call
+#11 terms 
+#12 model
+options(scipen = 9999999, "digits" = 8)
+
+fit1$coefficients[2]
+plot(fit1$residuals, main = "Residuals-ACT (Lowest - Highest)")
+#note how, as ACT increase, the unexplained portion of those ACT increases
+hist(fit1$residuals)
+summary(fit1)
+
+fit2 = lm(ACT~NonTvPdSocProsp + PS.MS + OD.Psp.MS, data = ACTvsMktSpl)
+summary(fit2)
+plot(fit2$residuals, main = "Residuals-ACT on MS")
+
+Baseline = cbind.data.frame(ACTvsMktSpl$ACT, fit2$fitted.values)
+Baseline$Difference = as.integer(Baseline[,1] - Baseline[,2])
+Baseline$TVMSP = ACTvsMktSpl$TV.MS
+Baseline$Prsp = ACTvsMktSpl$OD.Psp.MS
+fit3 = lm(Difference ~ Prsp, data = Baseline)
+summary(fit3)
+plot(fit3$residuals, main = "Residuals-ACT (Lowest - Highest)")
+
+#PerformanceAnalytics package
+#use to build a correlation chart
+#chart.Correlation(AllData,
+#                  method="spearman",
+#                  histogram=TRUE,
+#                  pch=16)
+
+
+
+#psych package
+#corr.test(Data.num,
+#          use = "pairwise",
+#          method="spearman",
+#          adjust="none",      # Can adjust p-values; see ?p.adjust for options
+#          alpha=.05)
+
+########################################################################
+#MS is negatively correlated with PR3
+Correlations = c()
+for(i in 1:length(GetNames)) {
+  Correlations[i] = cor(AllData$PS.MS, AllData[,GetNames[i]])
+}
+
+names(AllData[,GetNames])[13]
+plot(Correlations)
+Correlations
+Correlations = cor(AllData[,2:407])
+write.csv(Correlations, "ClientNamePivotCorrelations.csv")
+
+########################################################################
+
+#beginning of single data frame bsts model as built by Kim Laarsens @
+#https://kim...
+
+AllTargetVars = AllTargetVars2
+#cbind re variables from AllTargetVars into data frame with regressors
+#differs from AllData -> Xregressors regression in that it's not dynamically calling AllData
+#run regression on one type of ACT factor at a time
+#note that the dates were removed to facilitate regression [,2:length...]
+
+ACTPlusRegressors = list()
+for (i in 1:length(AllTargetVars)) {
+  ACTPlusRegressors[[i]] = cbind.data.frame(AllData[,AllTargetVars[i]],
+                                         Xregressors[,2:length(Xregressors)])
+}
+
+#name the 1st column of ACTPlusRegressors w/ corresponding target var title
+for (i in 1:length(AllTargetVars)) {
+  names(ACTPlusRegressors[[i]])[1] = AllTargetVars[i]
+}
+
+#run batch regression
+TwoFor = as.data.frame(ACTPlusRegressors[[18]])
+
+post.period = c(91,105)
+post.period.re = TwoFor[post.period[1]:post.period[2],1]
+
+#turn values to be predicted to NAs
+TwoFor[post.period[1]:post.period[2],1] = NA
+
+#semi local linear trend assumes slope component is AR(1) instead of random walk, using LU keyword search lagged by 1 week
+LagLU = lag(Xregressors[1:105,112], 1)
+LagLU[is.na(LagLU)] = Xregressors[1,112]
+
+ssR = AddSemilocalLinearTrend(list(), LagLU)
+
+#presume each year is a full season
+ssR = AddSeasonal(ssR, TwoFor[,1], nseasons = 2, season.duration =  52)
+
+reVar = TwoFor[,1]
+
+bsts.model = bsts(reVar ~ ., state.specification = ssR, niter = 10,
+                   ping = 1, seed = 2014, data = TwoFor[,2:length(TwoFor)])
+
+#now deconstruct the model to see trend and regression
+plot(bsts.model,"components")
+
+#predict holdout data using a burn in period
+burn = SuggestBurn(0.1, bsts.model)
+
+PositiveMean = function(b) {
+  b = b[abs(b) > 0]
+  if (length(b) > 0)
+    return(mean(b))
+  return(0)
+}
+
+options(scipen = 9999999, "digits" = 8)
+
+# Get the average coefficients when variables were selected (non-zero slopes)
+coeff = data.frame(melt(apply(bsts.model$coefficients[-(1:burn),], 2, PositiveMean)))
+coeff$Variable = as.character(row.names(coeff))
+coeff = coeff[abs(coeff$value) > .0001,1:2]
+
+BSTSSignifVarPlot = list()
+
+BSTSSignifVarPlot = ggplot(data = coeff, aes(x = Variable, y = value)) +
+  geom_bar(stat = "identity", position = "identity") +
+  theme(axis.text.x = element_text(angle = -90, hjust = 0)) +
+  xlab("") + ylab("") + ggtitle("Average coefficients")
+
+#write them out to image files
+for (i in 1) {
+  file_name = paste("BSTSSignifVarPlot", i, ".png", sep = "")
+  png(file_name)
+  print(BSTSSignifVarPlot)
+  dev.off()
+}
+
+#predict using MS for the holdout data, i.e. conditional on mkt.sp -> y values
+bsts.predicted = predict.bsts(bsts.model, horizon = 15, burn = burn, quantiles = c(.025, .975),
+                               newdata = TwoFor[91:105,])
+
+#put fitted+predicted and actual in dataframe for comparison, note that since the NAs were
+#predicted during modeling, the colmeans are 105 values long, replace these with bsts.predicted.mean
+#use data from pivot table used in ARIMA
+BSTSActvsPred = data.frame(
+  c(as.numeric(-colMeans(bsts.model$one.step.prediction.errors[-(1:burn),])[1:90] +
+                 TwoFor[1:90,1]), as.numeric(bsts.predicted$mean)),
+  c(as.numeric(TwoFor[1:90,1]),post.period.re), Date)
+
+names(BSTSActvsPred) <- c("Fitted", "Actual", "Date")
+
+#MAPE using ACT regressed on MS w/ state spec PR1 mkt
+BSTSMAPE = filter(BSTSActvsPred, Date > decimal_date(as.POSIXlt(ymd("xxxx-xx-x")))) %>% summarise("BSTSMAPE" = mean(abs(Actual - Fitted) / Actual))
+
+#use values form above to determine causal impact (p.p.r. - actual data)
+impact = CausalImpact(bsts.model = bsts.model,
+                       post.period.re = post.period.re)
+
+#get the 3 charts showing counterfactual, prediction, and pointwise CE (difference from counterfact)
+#and the cumulative effect
+plot(impact)
+summary(impact)
+summary(impact, "report")
+
+
+#citation: CausalImpact 1.1.3, Brodersen et al., Annals of Applied Statistics (2015). http://google.github.io/CausalImpact/”
+#################################################################################
+#run plsr (PCA + regression) on each dataframe
+
+VarImp = plsr(ACT ~ ., data = AllData)
+
+save = as.matrix(varImp(VarImp))
+
+AllData
+
+###################################################################################
+#batch bsts model using ACTPlusRegressors[[x]] as input data frames
+
+BatchBSTS = function(df) {
+
+  df = as.data.frame(df)
+
+  Imputation = function(column, zeros) {
+    df[which(df[,column] == 0), column] = round(abs(rnorm(zeros, mean = 0, sd = 1)))
+    return(df[,column])
+  }
+
+  zeros = c(); for (i in 1:ncol(df)) zeros[i] = length(which(df[,i] == 0))
+
+  for (i in 1:ncol(df)) {
+    k = zeros[i]
+    df[,i] = Imputation(i,k)
+  }
+
+  post.period = c(53,105)
+  post.period.re = df[post.period[1]:post.period[2],1]
+
+  df[post.period[1]:post.period[2],1] = NA
+
+  #semi local linear trend assumes slope component is AR(1) instead of random walk, using LU keyword search lagged by 1 week
+  LagLU = lag(Xregressors[1:105,112], 1)
+  LagLU[is.na(LagLU)] = Xregressors[1,112] # replace lagged NA to keep obs. 1 for other vars; not signif. impact on model
+
+  ssR = AddSemilocalLinearTrend(list(), LagLU) # empty list is part of syntax
+
+  #4 seasons per year
+  ssR = AddSeasonal(ssR, df[,1], nseasons = 8, season.duration =  13)
+
+  df$reVar = df[,1]
+  actName = colnames(df)[1]
+  df = df[, -1]
+
+  bsts.model = bsts(reVar ~ ., state.specification = ssR, niter = 150,
+                     ping = 50, seed = 2014, data = df)
+
+  #predict holdout data using a burn in period
+  burn = SuggestBurn(0.1, bsts.model)
+
+  PositiveMean = function(b) {
+    b = b[abs(b) > 0]
+    if (length(b) > 0)
+      return(mean(b))
+    else {return(0)}
+  }
+
+  # turn off scientific notation
+  options(scipen = 9999999, "digits" = 7)
+
+  ### Get the average coefficients when variables were selected (non-zero slopes)
+  coeff = data.frame(melt(apply(bsts.model$coefficients[-(1:burn),], 2,
+                                 PositiveMean)))
+  coeff$Variable = as.character(row.names(coeff))
+  coeff = coeff[abs(coeff$value) > .0001,1:2]
+
+  BSTSSignifVarPlot = list()
+  BSTSSignifVarPlot = ggplot(data = coeff, aes(x = Variable, y = value)) +
+    geom_bar(stat = "identity", position = "identity") +
+    theme(axis.text.x = element_text(angle = -90, hjust = 0)) +
+    xlab("") + ylab("") + ggtitle("Average coefficients")
+
+  #Note that horizon has to be changed when changing post.period values
+  bsts.predicted = predict.bsts(bsts.model, horizon = 53, burn = burn,
+                                 quantiles = c(.025, .975),
+                                 newdata = df[53:105,])
+
+  #put fitted+predicted and actual in dataframe for comparison, note that since the NAs were
+  #predicted during modeling, the colmeans must be 105 values long (cbind fitted values plus error and mean of predicted values for all iteration), replace these with bsts.predicted.mean
+  #use Date from pivot table used for ARIMA
+  BSTSActvsPred = data.frame(
+    c(as.numeric(-colMeans(bsts.model$one.step.prediction.errors[-(1:burn),])[1:52] +
+                   df[1:52,"reVar"]), as.numeric(bsts.predicted$mean)),
+    c(as.numeric(df[1:52,"reVar"]),post.period.re), Date)
+
+  names(BSTSActvsPred) = c("Fitted", "Actual", "Date")
+
+  # MAPE
+  BSTSMAPE = filter(BSTSActvsPred, Date > decimal_date(as.POSIXlt(ymd("xxxx-xx-xx")))) %>% summarise("BSTSMAPE" = mean(abs(Actual - Fitted) / Actual))
+
+  #use values form above to determine causal impact (p.p.r. - actual data)
+  impact = CausalImpact(bsts.model = bsts.model,
+                         post.period.re = post.period.re)
+
+  list(bsts.model, BSTSSignifVarPlot, BSTSActvsPred, BSTSMAPE, impact, actName)
+
+}
+
+AllACTBSTS = list()
+for (i in 1:length(AllTargetVars)) {
+  print(i)
+  AllACTBSTS[[i]] = BatchBSTS(ACTPlusRegressors[[i]])
+}
+
+names(ACTPlusRegressors)[13]
+
+AllACTBSTS[[23]][5][1]
+# Index | Content
+#     1 | bsts.model
+#     2 | BSTS SignifVarPlot
+#     3 | BSTS Pred
+#     4 | BSTS MAPE
+#     5 | impact analysis
+#   5.1 | impact series
+#   5.2 | impact summary
+#   5.3 | impact report
+#   5.4 | impact model
+#     6 | ACT type
+
+
+################################################################################
+
+BatchBSTS = function(df) {
+
+  df = as.data.frame(df)
+
+  Imputation = function(column, zeros) {
+    df[which(df[,column] == 0), column] = round(abs(rnorm(zeros, mean = 0, sd = 1)))
+    return(df[,column])
+  }
+
+  zeros = c(); for (i in 1:ncol(df)) zeros[i] = length(which(df[,i] == 0))
+
+  for (i in 1:ncol(df)) {
+    k = zeros[i]
+    df[,i] = Imputation(i,k)
+  }
+
+  post.period = c(53,105)
+  post.period.re = df[post.period[1]:post.period[2],1]
+
+  df[post.period[1]:post.period[2],1] = NA
+
+  #semi local linear trend assumes slope component is AR(1) instead of random walk, using LU keyword search lagged by 1 week
+  LagLU = lag(Xregressors[1:105,112], 1)
+  LagLU[is.na(LagLU)] = Xregressors[1,112] # replace lagged NA to keep obs. 1 for other vars; not signif. impact on model
+
+  ssR = AddSemilocalLinearTrend(list(), LagLU) # empty list is part of syntax
+
+  #4 seasons per year
+  ssR = AddSeasonal(ssR, df[,1], nseasons = 8, season.duration =  13)
+
+  df$reVar = df[,1]
+  actName = colnames(df)[1]
+  df = df[, -1]
+
+  bsts.model = bsts(reVar ~ ., state.specification = ssR, niter = 150,
+                     ping = 50, seed = 2014, data = df)
+
+  #predict holdout data using a burn in period
+  burn = SuggestBurn(0.1, bsts.model)
+
+  PositiveMean = function(b) {
+    b = b[abs(b) > 0]
+    if (length(b) > 0)
+      return(mean(b))
+    else {return(0)}
+  }
+
+  options(scipen = 9999999, "digits" = 7)
+
+  coeff = data.frame(melt(apply(bsts.model$coefficients[-(1:burn),], 2,
+                                 PositiveMean)))
+  coeff$Variable = as.character(row.names(coeff))
+  coeff = coeff[abs(coeff$value) > .0001,1:2]
+
+  BSTSSignifVarPlot = list()
+  BSTSSignifVarPlot = ggplot(data = coeff, aes(x = Variable, y = value)) +
+    geom_bar(stat = "identity", position = "identity") +
+    theme(axis.text.x = element_text(angle = -90, hjust = 0)) +
+    xlab("") + ylab("") + ggtitle("Average coefficients")
+
+  bsts.predicted = predict.bsts(bsts.model, horizon = 53, burn = burn,
+                                 quantiles = c(.025, .975),
+                                 newdata = df[53:105,])
+
+  BSTSActvsPred = data.frame(
+    c(as.numeric(-colMeans(bsts.model$one.step.prediction.errors[-(1:burn),])[1:52] +
+                   df[1:52,"reVar"]), as.numeric(bsts.predicted$mean)),
+    c(as.numeric(df[1:52,"reVar"]),post.period.re), Date)
+
+  names(BSTSActvsPred) = c("Fitted", "Actual", "Date")
+
+  BSTSMAPE = filter(BSTSActvsPred, Date > decimal_date(as.POSIXlt(ymd("xxxx-xx-xx")))) %>% summarise("BSTSMAPE" = mean(abs(Actual - Fitted) / Actual))
+
+  impact = CausalImpact(bsts.model = bsts.model,
+                         post.period.re = post.period.re)
+
+  list(bsts.model, BSTSSignifVarPlot, BSTSActvsPred, BSTSMAPE, impact, actName)
+
+}
+
+AllACTBSTS = list()
+for (i in 1:length(AllTargetVars)) {
+  print(i)
+  AllACTBSTS[[i]] = BatchBSTS(ACTPlusRegressors[[i]])
+}
+
